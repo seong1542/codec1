@@ -1,0 +1,220 @@
+#region NAMESPACE API
+
+using System;
+using System.Collections.Generic;
+
+#endregion
+
+namespace WinSound
+{
+    /// <summary>
+    /// Encoder and decoder
+    /// </summary>
+    public static class Codec
+    {
+        #region CONSTANT FIELD
+        
+        private const int SignBit          = 0x80;
+        private const int QuantizationMask = 0xf;
+        private const int SegmentShift     = 4;
+        private const int SegmentMask      = 0x70;
+        private const int Bias             = 0x84;
+        private const int Clip             = 8159;
+        
+        #endregion
+        
+        private static readonly short[] SegmentTable = { 0x3F,0x7F,0xFF,0x1FF,0x3FF,0x7FF,0xFFF,0x1FFF };
+
+        /// <summary>
+        /// Search linear(pcm) value in <see cref="SegmentTable"/>
+        /// </summary>
+        /// <param name="pcm"> Pcm value </param>
+        /// <returns> Searched index in <see cref="SegmentTable"/> </returns>
+        private static short Search(short pcm)
+        {
+            var index = 0;
+
+            short i;
+            for (i = 0; i < SegmentTable.Length; i++)
+            {
+                if (pcm <= SegmentTable[index])
+                {
+                    return i;
+                }
+                
+                index++;
+            }
+            
+            return (short)SegmentTable.Length;
+        }
+        
+        /// <summary>
+        /// Convert MU-Law to linear
+        /// </summary>
+        /// <param name="value"> MU-Law value </param>
+        /// <returns> Converted linear value </returns>
+        private static int ConvertULawToLinear(int value)
+        {
+            value = ~value;
+            var temp = ((value & QuantizationMask) << 3) + Bias;
+            temp <<= (value & SegmentMask) >> SegmentShift;
+            return (value & SignBit) > 0 ? Bias - temp : temp - Bias;
+        }
+
+        /// <summary>
+        /// Convert linear to MU-Law
+        /// </summary>
+        /// <param name="pcm"> Pcm value </param>
+        /// <returns> Converted MU-Law value </returns>
+        private static byte ConvertLinearToULaw(short pcm)
+        {
+            short mask;
+
+            // Get the sign and the magnitude of the value
+            pcm = (short)(pcm >> 2);
+            if (pcm < 0)
+            {
+                pcm = (short)-pcm;
+                mask = 0x7F;
+            }
+            else
+            {
+                mask = 0xFF;
+            }
+            
+            // Clip the magnitude
+            if (pcm > Clip)
+            {
+                pcm = Clip;
+            }
+            pcm += Bias >> 2;
+
+            // Convert the scaled magnitude to segment number
+            var segment = Search(pcm);
+
+            // Combine the sign, segment, quantization bits and complement the code word out of range
+            if (segment >= 8)
+            {
+                return (byte)(0x7F ^ mask);
+            }
+            
+            var value = (byte)((segment << 4) | ((pcm >> (segment + 1)) & 0xF));
+            return (byte)(value ^ mask);
+        }
+        
+        /// <summary>
+        /// Convert linear value array to MU-Law value array
+        /// </summary>
+        /// <param name="bytes"> Linear value array to convert to MU-Law value array </param>
+        /// <param name="bitsPerSample"> Bits per sample </param>
+        /// <param name="channels"> Number of channels </param>
+        /// <returns> Converted MU-Law value array </returns>
+        public static IEnumerable<byte> ConvertULawToLinear(byte[] bytes, int bitsPerSample, int channels)
+        {
+            // Number of tracks
+            var blockAlign = channels * bitsPerSample / 8;
+
+            var converted = new byte[bytes.Length * blockAlign];
+            for (int i = 0, j = 0; i < bytes.Length; i++, j += blockAlign)
+            {
+                // Convert to bytes
+                var value = ConvertULawToLinear(bytes[i]);
+                var values = BitConverter.GetBytes(value);
+                switch (bitsPerSample)
+                {
+                    // 8-bits
+                    case 8:
+                        switch (channels)
+                        {
+                            // 1 channel
+                            case 1:
+                                converted[j] = values[0];
+                                break;
+                            // 2 channels
+                            case 2:
+                                converted[j] = values[0];
+                                converted[j + 1] = values[0];
+                                break;
+                        }
+                        break;
+                    // 16-bits
+                    case 16:
+                        switch (channels)
+                        {
+                            // 1 channel
+                            case 1:
+                                converted[j] = values[0];
+                                converted[j + 1] = values[1];
+                                break;
+                            // 2 channels
+                            case 2:
+                                converted[j] = values[0];
+                                converted[j + 1] = values[1];
+                                converted[j + 2] = values[0];
+                                converted[j + 3] = values[1];
+                                break;
+                        }
+                        break;
+                }
+            }
+            
+            return converted;
+        }
+        
+        /// <summary>
+        /// Convert MU-Law value array to linear value array
+        /// </summary>
+        /// <param name="bytes"> MU-Law value array to convert to linear value array </param>
+        /// <param name="bitsPerSample"> Bits per sample </param>
+        /// <param name="channels"> Number of channels </param>
+        /// <returns> Converted MU-Law value array </returns>
+        public static byte[] ConvertLinearToULaw(byte[] bytes, int bitsPerSample, int channels)
+        {
+            // Number of tracks
+            var blockAlign = channels * bitsPerSample / 8;
+            
+            var converted = new byte[bytes.Length / blockAlign];
+            for (int i = 0, j = 0; i < converted.Length; i++)
+            {
+                // Depending on resolution
+                switch (bitsPerSample)
+                {
+                    // 8-bits
+                    case 8:
+                        switch (channels)
+                        {
+                            // 1 channel
+                            case 1:
+                                converted[i] = ConvertLinearToULaw(bytes[j]);
+                                j += 1;
+                                break;
+                            // 2 channels
+                            case 2:
+                                converted[i] = ConvertLinearToULaw(bytes[j]);
+                                j += 2;
+                                break;
+                        }
+                        break;
+                    // 16-bits
+                    case 16:
+                        switch (channels)
+                        {
+                            // 1 channel
+                            case 1:
+                                converted[i] = ConvertLinearToULaw(BitConverter.ToInt16(bytes, j));
+                                j += 2;
+                                break;
+                            // 2 channels
+                            case 2:
+                                converted[i] = ConvertLinearToULaw(BitConverter.ToInt16(bytes, j));
+                                j += 4;
+                                break;
+                        }
+                        break;
+                }
+            }
+            
+            return converted;
+        }
+    }
+}
