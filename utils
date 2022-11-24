@@ -1,0 +1,500 @@
+
+        // dll추가함
+        public const string dlladdres = @"C:\Users\seungyeon\Desktop\Client\Client\Client\bin\Debug\anything_ctest.dll";
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static IntPtr G711wbeEncode_const(ushort sampf, int mode, int law);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static void G711wbeEncode_dest(IntPtr p_work);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static int G711wbeEncode_reset(IntPtr p_work);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static int G711wbeEncode(short[] inwave, byte[] bitstream, IntPtr p_work);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static IntPtr G711wbeDecode_const(int mode, int law);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static void G711wbeDecode_dest(IntPtr p_work);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static int G711wbeDecode_reset(IntPtr p_work);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static int G711wbeDecode(byte[] bitstream, short[] outwave, IntPtr p_work, int ploss_status);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern unsafe public static void hardbit2softbit(int a, byte[] b, short* c);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern unsafe public static void softbit2hardbit(int a, short* b, byte[] c);
+        [DllImport(dlladdres, CallingConvention = CallingConvention.Cdecl)]
+        extern public static int checksoftbit(short[] bitstream);
+        /// <summary>
+        /// Konstruktor -> 생성자
+        /// </summary>
+        public Utils()
+        {
+
+        }
+
+        //Konstanten ->상수
+        const int SIGN_BIT = (0x80); // 128
+        const int QUANT_MASK = (0xf); //15
+        const int NSEGS = (8);
+        const int SEG_SHIFT = (4);
+        const int SEG_MASK = (0x70);//112
+        const int BIAS = (0x84);//132
+        const int CLIP = 8159;
+        static short[] seg_uend = new short[] { 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF }; // 63, 127, 255, 511, 1023, 4095, 8191
+
+        //여기서부터 G711.1 추가 상수
+
+        const int MODE_R1 = 0;
+        const int MODE_R2a = 1;
+        const int MODE_R2b = 2;
+        const int MODE_R3 = 3;
+
+        const int MODE_ULAW = 1;
+        const int MODE_ALAW = 2;
+
+        const int NSamplesPerFrame8k = 40;
+        const int NSamplesPerFrame16k = 80;
+
+        const int NBytesPerFrame0 = 40;
+        const int NBytesPerFrame1 = 10;
+        const int NBytesPerFrame2 = 10;
+        const int NBitsPerFrame0 = (NBytesPerFrame0 * 8);
+        const int NBitsPerFrame1 = (NBytesPerFrame1 * 8);
+        const int NBitsPerFrame2 = (NBytesPerFrame2 * 8);
+        const int TotalBytesPerFrame = (NBytesPerFrame0 + NBytesPerFrame1 + NBytesPerFrame2);
+        const int TotalBitsPerFrame = (TotalBytesPerFrame * 8);
+
+        const int idxG192_BitstreamLength = 1;
+        const UInt32 G192_HeaderSize = (idxG192_BitstreamLength + 1);
+        const short G192_SYNCHEADER = (short)0x6B21;
+        const int SAMPLE_NUM = NSamplesPerFrame16k;
+        const int nbits = NBitsPerFrame0 + NBitsPerFrame1 + NBitsPerFrame2;
+        const int nbytes = NBytesPerFrame0 + NBytesPerFrame1 + NBytesPerFrame2;
+
+        public struct G711_WBE_PARAMS
+        {
+            public int mode;
+            public int quiet;
+            public int format;
+            public UInt16 inputSF;
+            public int law;
+        }
+
+        /// <summary>
+        /// GetBytesPerInterval ->간격당 바이트 수 가져오기
+        /// </summary>
+        /// <param name="header"></param>
+        /// <returns></returns>
+        public static int GetBytesPerInterval(uint SamplesPerSecond, int BitsPerSample, int Channels)
+        {
+            int blockAlign = ((BitsPerSample * Channels) >> 3);  //128
+            int bytesPerSec = (int)(blockAlign * SamplesPerSecond); //128*8000 = 1,024,000
+            uint sleepIntervalFactor = 1000 / 20; //20 Milliseconds
+            int bytesPerInterval = (int)(bytesPerSec / sleepIntervalFactor); //2048
+
+            //Fertig ->완성이 된
+            return bytesPerInterval;
+        }
+
+
+        /// <summary>
+        /// MuLawToLinear
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
+        public static Byte[] MuLawToLinear(Byte[] bytes, int bitsPerSample, int channels)
+        {
+            return bytes;
+        }
+        public static Byte[] MuLawToLinear2(Byte[] bytes, int bitsPerSample, int channels)
+        {
+            //Anzahl Spuren ->트랙 수
+            int blockAlign = channels * bitsPerSample / 8;
+
+            //Für jeden Wert ->모든 값에 대해
+            Byte[] result = new Byte[bytes.Length * blockAlign];
+            for (int i = 0, counter = 0; i < bytes.Length; i++, counter += blockAlign)
+            {
+                //In Bytes umwandeln ->바이트로 변환
+                int value = MulawToLinear(bytes[i]);
+                Byte[] values = BitConverter.GetBytes(value);
+
+                switch (bitsPerSample)
+                {
+                    case 8:
+                        switch (channels)
+                        {
+                            //8 Bit 1 Channel
+                            case 1:
+                                result[counter] = values[0];
+                                break;
+
+                            //8 Bit 2 Channel
+                            case 2:
+                                result[counter] = values[0];
+                                result[counter + 1] = values[0];
+                                break;
+                        }
+                        break;
+
+                    case 16:
+                        switch (channels)
+                        {
+                            //16 Bit 1 Channel
+                            case 1:
+                                result[counter] = values[0];
+                                result[counter + 1] = values[1];
+                                break;
+
+                            //16 Bit 2 Channels
+                            case 2:
+                                result[counter] = values[0];
+                                result[counter + 1] = values[1];
+                                result[counter + 2] = values[0];
+                                result[counter + 3] = values[1];
+                                break;
+                        }
+                        break;
+                }
+            }
+
+            //Fertig ->완성이 된
+            return result;
+        }
+        /// <summary>
+        /// MuLawToLinear32
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <param name="bitsPerSample"></param>
+        /// <param name="channels"></param>
+        /// <returns></returns>
+
+
+        // 여기에 인코더 디코더 초기화 시키는 함수 작성
+        // Linear2~안에 2개씩 데이터 저장한 후 이걸 데이터 samplenum(80)까지 세었을 때, 인코딩~디코딩 해서 
+        /// <summary>
+        /// MuLawToLinear
+        /// </summary>
+        /// <param name="bytes"></param>
+        /// <returns></returns>
+        public static Byte[] LinearToMulaw(Byte[] bytes, int bitsPerSample, int channels)
+        {
+            IntPtr theEncoder;
+            IntPtr theDecoder;
+            int payloadsize;
+            int ploss_status = 0;
+            G711_WBE_PARAMS mydata; // 구조체 생성과 모드 설정
+            mydata.mode = MODE_R3;
+            mydata.quiet = 0;
+            mydata.format = 0;
+            mydata.inputSF = 16000;
+            mydata.law = MODE_ULAW;  // ALAW시 MODE_ALAW, MODE_ULAW시 바꾸기
+            int status;
+            byte[] cbuf = new byte[TotalBytesPerFrame];
+            short[] sbuf = new short[G192_HeaderSize + TotalBitsPerFrame];
+
+            theEncoder = G711wbeEncode_const(mydata.inputSF, mydata.mode, mydata.law);
+            G711wbeEncode_reset(theEncoder);
+
+            theDecoder = G711wbeDecode_const(mydata.mode, mydata.law);
+            G711wbeDecode_reset(theDecoder);
+
+            int counter = 0;
+            //Anzahl Spuren -> 트랙 수
+            int blockAlign = channels * bitsPerSample / 8;
+
+            //Ergebnis ->결과
+            //short형의 middlebuf를 준비시킴middlebuf값을 . 여기서 result값이 cbuf임.
+            //아래의 for문은 (bytes.Length/blockalign) 만큼 돌아가야 맞음.
+            unsafe
+            {
+                fixed (short* refsbuf = &sbuf[G192_HeaderSize])
+                {
+                    int resultIndex = 0;
+                    int len = bytes.Length / 2;
+                    short[] middlebuf = new short[80]; //SAMPLE_NuM = 80
+                    Byte[] result = new Byte[bytes.Length * 2];
+                    int cnt = 0;
+                    int k = 0;
+                    for (int i=0; i<len; i++)
+                    {
+                        switch (bitsPerSample)
+                        {
+                            case 8:
+                                switch (channels)
+                                {
+                                    case 1:
+                                        result[i] = linear2ulaw(bytes[resultIndex]);
+                                        resultIndex += 1;
+                                        break;
+
+                                    //8 Bit 2 Channel
+                                    case 2:
+                                        result[i] = linear2ulaw(bytes[resultIndex]);
+                                        resultIndex += 2;
+                                        break;
+                                }
+                                break;
+
+                            case 16:
+                                switch (channels)
+                                {
+                                    //16 Bit 1 Channel
+                                    case 1:
+                                        middlebuf[cnt] = BitConverter.ToInt16(bytes, resultIndex); // byte 단위로 읽어온 것을 한번에 (2개씩 읽어서)short로 읽어서 인코딩 후 byte배열에 차곡히 저장
+                                        cnt++;
+                                        resultIndex += 2;
+                                        if (cnt == 80 || (i + 1) == len)
+                                        {
+                                            status = G711wbeEncode(middlebuf, cbuf, theEncoder);
+                                            sbuf[0] = G192_SYNCHEADER;
+                                            sbuf[idxG192_BitstreamLength] = (short)nbits;
+                                            hardbit2softbit(nbytes, cbuf, refsbuf);
+                                            payloadsize = checksoftbit(sbuf);
+                                            ploss_status = 0;
+                                            if (payloadsize <= 0)
+                                                ploss_status = 1;
+                                            softbit2hardbit(nbytes, refsbuf, cbuf);
+                                            status = G711wbeDecode(cbuf, sbuf, theDecoder, ploss_status);
+                                            for (k = 0; k < 80; k++)
+                                            {
+                                                Byte[] values = BitConverter.GetBytes(sbuf[k]);
+                                                result[counter] = values[0];
+                                                result[counter + 1] = values[1];
+                                                counter += 2;
+                                            }
+                                            System.Array.Clear(sbuf, 0, sbuf.Length);
+                                            cnt = 0;
+                                            k = 0;
+                                        }
+                                        break;
+
+                                    //16 Bit 2 Channels
+                                    case 2:
+                                        result[i] = linear2ulaw(BitConverter.ToInt16(bytes, resultIndex));
+                                        resultIndex += 4;
+                                        break;
+                                }
+                                break;
+                        }
+                    }
+                    Array.Resize(ref result, counter);
+                    //Fertig -> 완성이 된
+                    return result;
+                }
+            }
+
+            //Byte[] result = new Byte[bytes.Length / blockAlign]; // result 를 cbuf 처럼 바꿔서 코딩짜야할 것 같음.
+
+            
+        }
+        public static Byte[] LinearToMulaw2(Byte[] bytes, int bitsPerSample, int channels)
+        {
+            //Anzahl Spuren -> 트랙 수
+            int blockAlign = channels * bitsPerSample / 8;
+
+            //Ergebnis ->결과
+            //short형의 middlebuf를 준비시킴middlebuf값을 . 여기서 result값이 cbuf임.
+            //아래의 for문은 (bytes.Length/blockalign) 만큼 돌아가야 맞음.
+            Byte[] result = new Byte[bytes.Length / blockAlign]; // result 를 cbuf 처럼 바꿔서 코딩짜야할 것 같음.
+            int resultIndex = 0;
+            for (int i = 0; i < result.Length; i++) // (i+1)이 80배수일 때마다 인코딩하고, 인코딩 할때의 그 (i+1)값을 cnt로 저장해뒀다가, for 밖에서 cnt부터 시작해서 다시 인코딩 하여 result에 저장.
+            {
+                //Je nach Auflösung ->해상도에 따라
+                switch (bitsPerSample)
+                {
+                    case 8:
+                        switch (channels)
+                        {
+                            //8 Bit 1 Channel
+                            case 1:
+                                result[i] = linear2ulaw(bytes[resultIndex]);
+                                resultIndex += 1;
+                                break;
+
+                            //8 Bit 2 Channel
+                            case 2:
+                                result[i] = linear2ulaw(bytes[resultIndex]);
+                                resultIndex += 2;
+                                break;
+                        }
+                        break;
+
+                    case 16:
+                        switch (channels)
+                        {
+                            //16 Bit 1 Channel
+                            case 1:
+                                result[i] = linear2ulaw(BitConverter.ToInt16(bytes, resultIndex)); // byte 단위로 읽어온 것을 한번에 (2개씩 읽어서)short로 읽어서 인코딩 후 byte배열에 차곡히 저장
+                                resultIndex += 2;
+                                break;
+
+                            //16 Bit 2 Channels
+                            case 2:
+                                result[i] = linear2ulaw(BitConverter.ToInt16(bytes, resultIndex));
+                                resultIndex += 4;
+                                break;
+                        }
+                        break;
+                }
+            }
+
+            //Fertig -> 완성이 된
+            return result;
+        }
+        /// <summary>
+        /// GetStandardDerivation -> 표준 파생어 가져오기?
+        /// </summary>
+        /// <param name="list"></param>
+        /// <returns></returns>
+        public static double GetStandardDerivation(System.Collections.Generic.List<double> list)
+        {
+            //Kopieren -> 복사
+            List<double> listCopy = new List<double>(list);
+            //Mittelwert berechnen
+            double average = listCopy.Average();
+
+            //Quadratsummen der Verbesserungen -> 개선의 제곱의 합 (수정의 제곱의 합)?
+            double sum = 0;
+            foreach (double value in listCopy)
+            {
+                double diff = average - value;
+                sum += Math.Pow(diff, 2);
+            }
+
+            //Ergebnis -> 결과
+            return Math.Sqrt(sum / (listCopy.Count - 1));
+        }
+        /// <summary>
+        /// MulawToLinear
+        /// </summary>
+        /// <param name="ulaw"></param>
+        /// <returns></returns>
+        public static Int32 MulawToLinear(Int32 ulaw) // 디코딩할 때 쓰이는 함수 기존 G711코덱과 같은 것을 가져옴. 즉, MulawToLinear, linear2ulaw함수로 인코딩, 디코딩하는데 channel을 나누어 돌림
+        {
+            ulaw = ~ulaw;
+            int t = ((ulaw & QUANT_MASK) << 3) + BIAS;
+            t <<= (ulaw & SEG_MASK) >> SEG_SHIFT;
+            return ((ulaw & SIGN_BIT) > 0 ? (BIAS - t) : (t - BIAS));
+        }
+        /// <summary>
+        /// search -> 찾다
+        /// </summary>
+        /// <param name="val"></param>
+        /// <param name="table"></param>
+        /// <param name="size"></param>
+        /// <returns></returns>
+        static short search(short val, short[] table, short size)
+        {
+            short i;
+            int index = 0;
+            for (i = 0; i < size; i++)
+            {
+                if (val <= table[index])
+                {
+                    return (i);
+                }
+                index++;
+            }
+            return (size);
+        }
+
+        /// <summary>
+        /// linear2ulaw.
+        /// </summary>
+        /// <param name="pcm_val"></param>
+        /// <returns></returns>
+        public static Byte linear2ulaw(short pcm_val)  // unsigned char 에서 byte로 return 된다는 점 빼고 기존 linear2ulaw 함수와 같음
+        {
+            short mask = 0;
+            short seg = 0;
+            Byte uval = 0;
+
+            /* Get the sign and the magnitude of the value.  -> 값의 부호와 크기를 가져옵니다. */
+            pcm_val = (short)(pcm_val >> 2);
+            if (pcm_val < 0)
+            {
+                pcm_val = (short)-pcm_val;
+                mask = 0x7F;
+            }
+            else
+            {
+                mask = 0xFF;
+            }
+            /* clip the magnitude ->크기를 자르다 */
+            if (pcm_val > CLIP)//8159보다 크면 pcm_val에 8159값을 저장 (규모를 축소)
+            {
+                pcm_val = CLIP;
+            }
+            pcm_val += (BIAS >> 2);
+
+            /* Convert the scaled magnitude to segment number. -> 스케일링된 크기를 세그먼트 번호로 변환합니다.*/
+            seg = search(pcm_val, seg_uend, (short)8);
+
+            /*
+            * Combine the sign, segment, quantization bits;
+            * and complement the code word. ->부호, 세그먼트, 양자화 비트를 결합하고 코드 워드를 보완합니다.
+            */
+            /* out of range, return maximum value. ->범위를 벗어나면 최대값을 반환합니다. */
+            if (seg >= 8)
+            {
+                return (Byte)(0x7F ^ mask);
+            }
+            else
+            {
+                uval = (Byte)((seg << 4) | ((pcm_val >> (seg + 1)) & 0xF));
+                return ((Byte)(uval ^ mask));
+            }
+        }
+        public static int[] MuLawToLinear32(Byte[] bytes, int bitsPerSample, int channels)
+        {
+            //Anzahl Spuren ->트랙 수
+            int blockAlign = channels;
+
+            //Für jeden Wert ->모든 값에 대해
+            int[] result = new int[bytes.Length * blockAlign];
+            for (int i = 0, counter = 0; i < bytes.Length; i++, counter += blockAlign)
+            {
+                //In Int32 umwandeln -> Int32로 전환? unwandeIn이 전환이라는 뜻
+                int value = MulawToLinear(bytes[i]);
+
+                switch (bitsPerSample)
+                {
+                    case 8:
+                        switch (channels)
+                        {
+                            //8 Bit 1 Channel
+                            case 1:
+                                result[counter] = value;
+                                break;
+
+                            //8 Bit 2 Channel
+                            case 2:
+                                result[counter] = value;
+                                result[counter + 1] = value;
+                                break;
+                        }
+                        break;
+
+                    case 16:
+                        switch (channels)
+                        {
+                            //16 Bit 1 Channel
+                            case 1:
+                                result[counter] = value;
+                                break;
+
+                            //16 Bit 2 Channels
+                            case 2:
+                                result[counter] = value;
+                                result[counter + 1] = value;
+                                break;
+                        }
+                        break;
+                }
+            }
+
+            //Fertig -> 완성이 된
+            return result;
+        }
+    }
+}
